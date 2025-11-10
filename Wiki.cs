@@ -40,11 +40,12 @@ namespace Claymore.SharpMediaWiki
             _highLimits = false;
             _isBot = false;
             SleepBetweenEdits = 10;
-            SleepBetweenQueries = 10;
+            SleepBetweenQueries = 0;            
             Version version = Assembly.GetExecutingAssembly().GetName().Version;
             _userAgent = string.Format("SharpMediaWiki/{0}.{1}",
                 version.Major, version.Minor);
             _namespaces = new Dictionary<string, int>();
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
         }
 
         public int SleepBetweenEdits
@@ -54,7 +55,7 @@ namespace Claymore.SharpMediaWiki
 
         public int SleepBetweenQueries
         {
-            set { _sleepBetweenQueries = Math.Max(2, value) * 1000; }
+            set { _sleepBetweenQueries = Math.Max(1, value) * 1000; }
         }
 
         public Uri Uri
@@ -109,10 +110,21 @@ namespace Claymore.SharpMediaWiki
             try
             {
                 XmlDocument xml = MakeRequest(Action.Login, parameters);
-                string result = xml.SelectSingleNode("//login").Attributes["result"].Value;
+                XmlNodeList loginNodes = xml.SelectNodes("//login");
+                XmlNode currentLoginNode = null;             
+                string result = string.Empty;
+                foreach (XmlNode loginNode in loginNodes)
+                {
+                    if (loginNode.Attributes["result"] != null)
+                    {
+                        currentLoginNode = loginNode;
+                        result = loginNode.Attributes["result"].Value;
+                    }
+                }
+                
                 if (result == "NeedToken")
                 {
-                    string loginToken = xml.SelectSingleNode("//login").Attributes["token"].Value;
+                    string loginToken = currentLoginNode.Attributes["token"].Value;
                     
                     parameters = new ParameterCollection
                     {
@@ -131,17 +143,27 @@ namespace Claymore.SharpMediaWiki
 
                 parameters = new ParameterCollection
                 {
+                    { "meta", "tokens"},
+                    { "type", "csrf"}
+                };
+
+                XmlDocument doc = Query(QueryBy.Titles, parameters, "Main Page");
+                XmlNode tokensNode = doc.SelectSingleNode("//tokens");
+                _token = tokensNode != null ? tokensNode.Attributes["csrftoken"].Value : "";
+
+                parameters = new ParameterCollection
+                {
                     { "prop", "info" },
                     { "meta", "userinfo" },
                     { "uiprop", "rights" },
                     { "intoken", "edit" }
                 };
 
-                XmlDocument doc = Query(QueryBy.Titles, parameters, "Main Page");
+                doc = Query(QueryBy.Titles, parameters, "Main Page");
                 _highLimits = doc.SelectSingleNode("//rights[r=\"apihighlimits\"]/r") != null;
                 _isBot = doc.SelectSingleNode("//rights[r=\"bot\"]/r") != null;
                 XmlNode pageNode = doc.SelectSingleNode("//page");
-                _token = pageNode != null ? pageNode.Attributes["edittoken"].Value : "";
+                //_token = pageNode != null ? pageNode.Attributes["edittoken"].Value : "";
             }
             catch (WebException e)
             {
@@ -155,19 +177,30 @@ namespace Claymore.SharpMediaWiki
             {
                 ParameterCollection parameters = new ParameterCollection
                 {
+                    { "meta", "tokens"},
+                    { "type", "csrf"}
+            };
+
+                XmlDocument doc = Query(QueryBy.Titles, parameters, "Main Page");                
+                XmlNode tokensNode = doc.SelectSingleNode("//tokens");
+                _token = tokensNode != null ? tokensNode.Attributes["csrftoken"].Value : "";
+
+                parameters = new ParameterCollection
+                {
                     { "prop", "info" },
                     { "meta", "userinfo" },
                     { "uiprop", "rights" },
-                    { "intoken", "edit" }
+                    { "intoken", "edit" }                    
                 };
 
-                XmlDocument doc = Query(QueryBy.Titles, parameters, "Main Page");
+                doc = Query(QueryBy.Titles, parameters, "Main Page");
                 _highLimits = doc.SelectSingleNode("//rights[r=\"apihighlimits\"]/r") != null;
                 _isBot = doc.SelectSingleNode("//rights[r=\"bot\"]/r") != null;
                 XmlNode pageNode = doc.SelectSingleNode("//page");
                 XmlNode userNode = doc.SelectSingleNode("//userinfo");
                 _username = userNode != null ? userNode.Attributes["name"].Value : "";
-                _token = pageNode != null ? pageNode.Attributes["edittoken"].Value : "";
+                //_token = pageNode != null ? pageNode.Attributes["edittoken"].Value : "";
+                
             }
             catch (WebException e)
             {
@@ -457,15 +490,18 @@ namespace Claymore.SharpMediaWiki
                            WatchFlags watch,
                            SaveFlags mode,
                            bool bot)
-        {
+        {            
             ParameterCollection parameters = new ParameterCollection
-            {
-                { "prop", "info" },
-                { "intoken", "edit" }
-            };
-            XmlDocument doc = Query(QueryBy.Titles, parameters, title);
-            XmlNode pageNode = doc.SelectSingleNode("//page");
-            string token = pageNode != null ? pageNode.Attributes["edittoken"].Value : "";
+                {
+                    { "meta", "tokens"},
+                    { "type", "csrf"}
+                };
+
+            XmlDocument doc = Query(QueryBy.Titles, parameters, "Main Page");
+            XmlNode tokensNode = doc.SelectSingleNode("//tokens");
+            string token = tokensNode != null ? tokensNode.Attributes["csrftoken"].Value : "";
+
+
             return Save(title,
                         section,
                         text,
@@ -983,6 +1019,7 @@ namespace Claymore.SharpMediaWiki
             string query = PrepareQuery(action, parameters);
             for (int tries = 0; tries < 3; ++tries)
             {
+                System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
                 HttpWebRequest request = PrepareRequest();
                 using (StreamWriter sw =
                     new StreamWriter(request.GetRequestStream()))
@@ -1001,7 +1038,8 @@ namespace Claymore.SharpMediaWiki
                     using (StreamReader sr =
                         new StreamReader(GetResponseStream((HttpWebResponse)response)))
                     {
-                        doc.LoadXml(sr.ReadToEnd());
+                        string responseXmlText = sr.ReadToEnd();                        
+                        doc.LoadXml(responseXmlText);
                         _lastQueryTime = DateTime.Now;
                         XmlNode errorNode = doc.SelectSingleNode("//error");
                         if (errorNode != null &&
@@ -1286,7 +1324,7 @@ namespace Claymore.SharpMediaWiki
         private HttpWebRequest PrepareRequest(Uri uri, RequestMethod method, string contentType)
         {
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
-            request.AllowAutoRedirect = false;
+            request.AllowAutoRedirect = true;
             request.Method = method.ToString().ToUpper();
             if (method == RequestMethod.Post)
             {
