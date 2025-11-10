@@ -2,7 +2,7 @@
 
 h2. Dependencies
 
-You will need "Microsoft .NET Framework 3.5":http://www.microsoft.com/downloads/details.aspx?FamilyId=333325FD-AE52-4E35-B531-508D977D32A6&displaylang=ento to compile and use the library on Windows. It can be also compiled with "Mono 2.4":http://mono-project.com/Main_Page (at least "MoMA":http://www.mono-project.com/MoMA didn't report any problems).
+You will need "Microsoft .NET Framework 4.6":https://www.microsoft.com/en-us/download/details.aspx?id=48137 to compile and use the library on Windows. It can be also compiled with "Mono 2.4":http://mono-project.com/Main_Page (at least "MoMA":http://www.mono-project.com/MoMA didn't report any problems).
 
 h2. License
 
